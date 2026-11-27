@@ -1,0 +1,68 @@
+openapi: 3.0.3
+info: { title: Roka Coins Data API, version: 1.0.0 }
+servers: [{ url: /api/v1 }]
+components:
+  securitySchemes:
+    apiKey: { type: http, scheme: bearer, description: "rcd_<prefix>_<secret>" }
+  schemas:
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, enum: [false] }
+        error: { type: object, properties: { code: { type: string }, message: { type: string }, details: { type: object } } }
+        request_id: { type: string }
+    Coin:
+      type: object
+      properties:
+        id: { type: string }
+        identity: { type: object, properties: { canonical_id: { type: string }, chain_id: { type: integer }, asset_type: { type: string, enum: [native, token] }, contract_address: { type: string, nullable: true } } }
+        chain: { type: object }
+        name: { type: string, nullable: true }
+        symbol: { type: string, nullable: true }
+        decimals: { type: integer, nullable: true }
+        description: { type: string, nullable: true }
+        logo: { type: object, properties: { url: { type: string }, is_fallback: { type: boolean } } }
+        links: { type: object, properties: { website: {type: string, nullable: true}, twitter: {type: string, nullable: true}, telegram: {type: string, nullable: true}, discord: {type: string, nullable: true}, github: {type: string, nullable: true}, other: { type: object } } }
+        verification_status: { type: string, enum: [unverified, verified, rejected] }
+        metadata_sources: { type: array, items: { type: string } }
+        metadata_updated_at: { type: string, format: date-time }
+  responses:
+    Error: { description: Error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+  parameters:
+    chainId: { name: chain_id, in: path, required: true, schema: { type: integer } }
+    address: { name: contract_address, in: path, required: true, schema: { type: string, pattern: '^0x[0-9a-fA-F]{40}$' } }
+    assetRef: { name: asset, in: path, required: true, schema: { type: string }, description: EVM address or "native" }
+    page: { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+    limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+paths:
+  /chains: { get: { summary: List supported chains, responses: { '200': { description: OK }, default: { $ref: '#/components/responses/Error' } } } }
+  /chains/{chain_id}: { get: { summary: Get chain, parameters: [{ $ref: '#/components/parameters/chainId' }], responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Error' } } } }
+  /coins:
+    get: { summary: List assets, parameters: [{ $ref: '#/components/parameters/page' }, { $ref: '#/components/parameters/limit' }, { name: chain, in: query, schema: { type: string } }], responses: { '200': { description: OK } } }
+  /coins/{chain_id}/{contract_address}:
+    get:
+      summary: Token metadata (read-through cache)
+      parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/address' }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object, properties: { success: { type: boolean }, data: { $ref: '#/components/schemas/Coin' }, metadata: { type: object, properties: { cache: { type: string, enum: [hit, stale, miss] } } }, request_id: { type: string } } } } } }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /coins/native/{chain_id}: { get: { summary: Native asset metadata, parameters: [{ $ref: '#/components/parameters/chainId' }], responses: { '200': { description: OK }, '404': { $ref: '#/components/responses/Error' } } } }
+  /search: { get: { summary: Search assets, parameters: [{ name: q, in: query, required: true, schema: { type: string, minLength: 2, maxLength: 100 } }, { name: chain, in: query, schema: { type: string } }, { $ref: '#/components/parameters/page' }, { $ref: '#/components/parameters/limit' }], responses: { '200': { description: OK } } } }
+  /metadata/discover:
+    post:
+      summary: Discover a token not yet stored
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [chain_id, contract_address], properties: { chain_id: { type: integer }, contract_address: { type: string } } } } } }
+      responses: { '200': { description: Already known }, '201': { description: Discovered }, '404': { $ref: '#/components/responses/Error' }, '429': { $ref: '#/components/responses/Error' } }
+  /admin/chains: { get: { security: [{ apiKey: [] }], summary: List all chains, responses: { '200': { description: OK } } }, post: { security: [{ apiKey: [] }], summary: Create chain, responses: { '201': { description: Created } } } }
+  /admin/chains/{chain_id}: { patch: { security: [{ apiKey: [] }], summary: Update chain, parameters: [{ $ref: '#/components/parameters/chainId' }], responses: { '200': { description: OK } } } }
+  /admin/coins: { get: { security: [{ apiKey: [] }], summary: List assets (admin view), responses: { '200': { description: OK } } }, post: { security: [{ apiKey: [] }], summary: Register official asset, responses: { '201': { description: Created } } } }
+  /admin/coins/{chain_id}/{asset}: { get: { security: [{ apiKey: [] }], summary: Inspect asset, parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/assetRef' }], responses: { '200': { description: OK } } }, patch: { security: [{ apiKey: [] }], summary: Set verification status, parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/assetRef' }], responses: { '200': { description: OK } } } }
+  /admin/coins/{chain_id}/{asset}/override: { put: { security: [{ apiKey: [] }], summary: Apply override, parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/assetRef' }], responses: { '200': { description: OK } } }, delete: { security: [{ apiKey: [] }], summary: Remove override, parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/assetRef' }], responses: { '200': { description: OK } } } }
+  /admin/coins/{chain_id}/{asset}/refresh: { post: { security: [{ apiKey: [] }], summary: Refresh now, parameters: [{ $ref: '#/components/parameters/chainId' }, { $ref: '#/components/parameters/assetRef' }], responses: { '200': { description: OK } } } }
+  /admin/discovered: { get: { security: [{ apiKey: [] }], summary: Unverified discovered tokens, responses: { '200': { description: OK } } } }
+  /admin/providers: { get: { security: [{ apiKey: [] }], summary: Provider health, parameters: [{ name: probe, in: query, schema: { type: boolean } }], responses: { '200': { description: OK } } } }
+  /admin/jobs: { get: { security: [{ apiKey: [] }], summary: Refresh jobs, responses: { '200': { description: OK } } } }
+  /admin/jobs/{job_id}/retry: { post: { security: [{ apiKey: [] }], summary: Retry failed job, parameters: [{ name: job_id, in: path, required: true, schema: { type: string, format: uuid } }], responses: { '200': { description: OK } } } }
