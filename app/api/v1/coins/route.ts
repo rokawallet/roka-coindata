@@ -10,10 +10,16 @@ export const GET = createRoute({ auth: 'public', rateLimit: 'public' }, async (c
   const q = parse(coinListQuerySchema, Object.fromEntries(ctx.query));
   const chains = await ctx.container.chains.list({ activeOnly: true });
   let selected = chains;
-  if (q.chain) {
-    selected = chains.filter((c) => String(c.chain_id) === q.chain || c.slug === q.chain.toLowerCase());
-    if (selected.length === 0) throw errors.invalidRequest('Unknown or inactive chain filter');
+    if (q.chain) {
+    const chainFilter = q.chain.toLowerCase();
+    selected = chains.filter(
+      (c) => String(c.chain_id) === q.chain || c.slug === chainFilter,
+    );
+    if (selected.length === 0) {
+      throw errors.invalidRequest('Unknown or inactive chain filter');
+    }
   }
+
   const { items, total } = await ctx.container.assets.list(
     { chainIds: selected.map((c) => c.chain_id), excludeRejected: true },
     q.page,
